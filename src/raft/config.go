@@ -8,16 +8,19 @@ package raft
 // test with the original before submitting.
 //
 
-import "labrpc"
-import "log"
-import "sync"
-import "testing"
-import "runtime"
-import crand "crypto/rand"
-import "encoding/base64"
-import "sync/atomic"
-import "time"
-import "fmt"
+import (
+	"labrpc"
+	"log"
+	"runtime"
+	"sync"
+	"testing"
+
+	crand "crypto/rand"
+	"encoding/base64"
+	"fmt"
+	"sync/atomic"
+	"time"
+)
 
 func randstring(n int) string {
 	b := make([]byte, 2*n)
@@ -144,6 +147,7 @@ func (cfg *config) start1(i int) {
 	applyCh := make(chan ApplyMsg)
 	go func() {
 		for m := range applyCh {
+			// log.Printf("applych")
 			err_msg := ""
 			if m.UseSnapshot {
 				// ignore the snapshot
@@ -316,6 +320,7 @@ func (cfg *config) checkNoLeader() {
 }
 
 // how many servers think a log entry is committed?
+// 如何判断被提交？看server中index索引的log是否存在，并且是否存了相同的command
 func (cfg *config) nCommitted(index int) (int, interface{}) {
 	count := 0
 	cmd := -1
@@ -327,7 +332,7 @@ func (cfg *config) nCommitted(index int) (int, interface{}) {
 		cfg.mu.Lock()
 		cmd1, ok := cfg.logs[i][index]
 		cfg.mu.Unlock()
-
+		// log.Printf("nCommitted cmd1 %v ok %v", cmd1, ok)
 		if ok {
 			if count > 0 && cmd != cmd1 {
 				cfg.t.Fatalf("committed values do not match: index %v, %v, %v\n",
@@ -382,10 +387,11 @@ func (cfg *config) wait(index int, n int, startTerm int) interface{} {
 func (cfg *config) one(cmd int, expectedServers int) int {
 	t0 := time.Now()
 	starts := 0
-	for time.Since(t0).Seconds() < 10 {
+	for time.Since(t0).Seconds() < 10 { // 检查10s
 		// try all the servers, maybe one is the leader.
 		index := -1
-		for si := 0; si < cfg.n; si++ {
+		for si := 0; si < cfg.n; si++ { // cfg.n表示raft server的个数
+			// 打开每一个raft server，如果是leader，就添加一个command
 			starts = (starts + 1) % cfg.n
 			var rf *Raft
 			cfg.mu.Lock()
@@ -397,19 +403,23 @@ func (cfg *config) one(cmd int, expectedServers int) int {
 				index1, _, ok := rf.Start(cmd)
 				if ok {
 					index = index1
+					// log.Printf("config.go index %v", index)
 					break
 				}
 			}
 		}
 
-		if index != -1 {
+		if index != -1 { // index为 leader中最后一个logEntry的index
 			// somebody claimed to be the leader and to have
 			// submitted our command; wait a while for agreement.
 			t1 := time.Now()
-			for time.Since(t1).Seconds() < 2 {
-				nd, cmd1 := cfg.nCommitted(index)
-				if nd > 0 && nd >= expectedServers {
+			for time.Since(t1).Seconds() < 2 { // 如果两秒内成功同步，就说明成功
+				nd, cmd1 := cfg.nCommitted(index) // 有多少server认为index处的entry已经被提交了
+				// log.Printf("config.go nd %v expectedServers %v cmd1 %v index %v", nd, expectedServers, cmd, index)
+				if nd > 0 && nd >= expectedServers { // 如果server数大于expected的数量，则正确
 					// committed
+					// tmp, _ := cmd1.(int)
+					// log.Printf("config.go cmd1 %v cmd2 %v", cmd1, tmp)
 					if cmd2, ok := cmd1.(int); ok && cmd2 == cmd {
 						// and it was the command we submitted.
 						return index
