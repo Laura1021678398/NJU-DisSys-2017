@@ -46,6 +46,7 @@ type ApplyMsg struct {
 }
 
 type Entry struct {
+	Index   int
 	Term    int // 日志条目的term
 	Command interface{}
 }
@@ -186,30 +187,52 @@ func (rf *Raft) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) {
 		// log.Printf("raft%v RequestVote() from %v have votedFor %v %v %v ", rf.me, args.CandidateID, rf.votedFor, args.LastLogIndex, len(rf.log))
 		// 如果两份日志最后的条目的任期号不同，那么任期号大的日志更加新；
 		// 如果两份日志最后的条目任期号相同，那么日志比较长的那个就更加新。
-		if args.LastLogIndex == 0 { // 当候选者没有日志的时候
-			if len(rf.Log) == 0 { // 当前服务器也没有日志，则一样新
-				rf.ftimer.Stop()
-				rf.ftimer.Reset(time.Duration(rf.electionTimeout) * time.Millisecond)
-				reply.VoteGranted = true
-				rf.votedFor = args.CandidateID
-			} else {
-				reply.VoteGranted = false
-			}
-		} else if args.LastLogTerm > rf.Log[len(rf.Log)-1].Term { // 候选者的最后一个日志条目的term更加新
+		if len(rf.Log) == 0 { // 如果当前服务器没有日志条目的话，肯定没有其他服务器新或者一样新
 			rf.ftimer.Stop()
 			rf.ftimer.Reset(time.Duration(rf.electionTimeout) * time.Millisecond)
 			reply.VoteGranted = true
 			rf.votedFor = args.CandidateID
-		} else if args.LastLogTerm == rf.Log[len(rf.Log)-1].Term {
-			if args.LastLogIndex >= len(rf.Log) {
+		} else {
+			if args.LastLogTerm > rf.Log[len(rf.Log)-1].Term { // 发送过来的日志的最后一个条目任期号大
 				rf.ftimer.Stop()
 				rf.ftimer.Reset(time.Duration(rf.electionTimeout) * time.Millisecond)
 				reply.VoteGranted = true
 				rf.votedFor = args.CandidateID
-			} else {
-				reply.VoteGranted = false
+			} else if args.LastLogTerm == rf.Log[len(rf.Log)-1].Term { // 任期号相同
+				if args.LastLogIndex >= len(rf.Log) {
+					rf.ftimer.Stop()
+					rf.ftimer.Reset(time.Duration(rf.electionTimeout) * time.Millisecond)
+					reply.VoteGranted = true
+					rf.votedFor = args.CandidateID
+				} else {
+					reply.VoteGranted = false
+				}
 			}
 		}
+		// if args.LastLogIndex == 0 { // 当候选者没有日志的时候
+		// 	if len(rf.Log) == 0 { // 当前服务器也没有日志，则一样新
+		// 		rf.ftimer.Stop()
+		// 		rf.ftimer.Reset(time.Duration(rf.electionTimeout) * time.Millisecond)
+		// 		reply.VoteGranted = true
+		// 		rf.votedFor = args.CandidateID
+		// 	} else {
+		// 		reply.VoteGranted = false
+		// 	}
+		// } else if args.LastLogTerm > rf.Log[len(rf.Log)-1].Term { // 候选者的最后一个日志条目的term更加新
+		// 	rf.ftimer.Stop()
+		// 	rf.ftimer.Reset(time.Duration(rf.electionTimeout) * time.Millisecond)
+		// 	reply.VoteGranted = true
+		// 	rf.votedFor = args.CandidateID
+		// } else if args.LastLogTerm == rf.Log[len(rf.Log)-1].Term {
+		// 	if args.LastLogIndex >= len(rf.Log) {
+		// 		rf.ftimer.Stop()
+		// 		rf.ftimer.Reset(time.Duration(rf.electionTimeout) * time.Millisecond)
+		// 		reply.VoteGranted = true
+		// 		rf.votedFor = args.CandidateID
+		// 	} else {
+		// 		reply.VoteGranted = false
+		// 	}
+		// }
 	}
 }
 
@@ -235,8 +258,8 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 
 	if isLeader {
 		term = rf.currentTerm
-		index = len(rf.Log)
-		rf.Log = append(rf.Log, Entry{Term: term, Command: command})
+		index = len(rf.Log) + 1 // 新的logEntry的index是当前log的长度+1
+		rf.Log = append(rf.Log, Entry{Index: index, Term: term, Command: command})
 		log.Printf("raft%v Start() %v", rf.me, rf.Log)
 	}
 
@@ -422,11 +445,11 @@ func (rf *Raft) startElection() {
 
 func (rf *Raft) applyLog() {
 	rf.mu.Lock()
-	for i := rf.lastApplied; i <= rf.commitedIndex; i++ {
+	for i := rf.lastApplied + 1; i <= rf.commitedIndex; i++ {
 		log.Printf("applylog")
 		msg := ApplyMsg{}
-		msg.Index = i
-		msg.Command = rf.Log[i].Command
+		msg.Index = i - 1
+		msg.Command = rf.Log[i-1].Command
 		rf.applyChan <- msg
 	}
 	rf.lastApplied = rf.commitedIndex
@@ -459,7 +482,7 @@ func (rf *Raft) beLeader() {
 func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply) {
 	// log.Printf("raft%v AppendEntries()", rf.me)
 	// log.Printf("raft%v AppendEntries() currentLeader %v currentState %v args.PrevLogIndex %v", rf.me, args.LeaderID, rf.status, args.PrevLogIndex)
-	log.Printf("raft%v AppendEntries() rf.Log %v args.PrevLogIndex %v args.Entries %v ", rf.me, rf.Log, args.PrevLogIndex, args.Entries)
+	// log.Printf("raft%v AppendEntries() rf.Log %v args.PrevLogIndex %v args.Entries %v ", rf.me, rf.Log, args.PrevLogIndex, args.Entries)
 	reply.Term = rf.currentTerm
 	if rf.status == FOLLWER && args.Term == rf.currentTerm {
 		rf.ftimer.Stop()
@@ -483,18 +506,18 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 		if args.PrevLogIndex == 0 && len(rf.Log) == 0 {
 			reply.Success = true
 			if len(args.Entries) > 0 {
-				// log.Printf("raft%v AppendEntries() %v %v ", rf.me, args.Entries, rf.log)
+				// log.Printf("raft%v AppendEntries() %v %v ", rf.me, args.Entries, rf.Log)
 			}
 			rf.Log = append(rf.Log, args.Entries...)
-		} else if args.PrevLogIndex >= len(rf.Log) { // 接收者日志中没有包含这样一个条目
+		} else if args.PrevLogIndex > len(rf.Log) { // 接收者日志中没有包含这样一个条目
 			reply.Success = false
-		} else if rf.Log[args.PrevLogIndex].Term != args.PrevLogTerm { // 接收者日志中包含了，但是不对
+		} else if rf.Log[args.PrevLogIndex-1].Term != args.PrevLogTerm { // 接收者日志中包含了，但是不对
 			reply.Success = false
 			rf.Log = rf.Log[:args.PrevLogIndex]
 		} else {
 			reply.Success = true
 			if len(args.Entries) > 0 {
-				// log.Printf("raft%v AppendEntries() %v %v", rf.me, args.Entries, rf.log)
+				log.Printf("raft%v AppendEntries() %v %v", rf.me, args.Entries, rf.Log)
 			}
 			rf.Log = append(rf.Log, args.Entries...)
 		}
@@ -520,18 +543,15 @@ func (rf *Raft) startAppendEntries(server int) {
 				PrevLogIndex:  rf.nextIndex[server] - 1,
 				LeaderCommmit: rf.commitedIndex,
 			}
-			if args.PrevLogIndex < len(rf.Log) {
-				args.PrevLogTerm = rf.Log[args.PrevLogIndex].Term
+			if args.PrevLogIndex <= len(rf.Log) && args.PrevLogIndex > 0 {
+				args.PrevLogTerm = rf.Log[args.PrevLogIndex-1].Term
+			} else {
+				args.PrevLogTerm = 0
 			}
 			rf.mu.Unlock()
 			if rf.nextIndex[server] <= len(rf.Log) {
 				// TODO 这里修改以后可以过concurrentStarts的test，这里的index还是有问题，第一个entry没有传过去
-				if args.PrevLogIndex == 0 {
-					args.Entries = rf.Log
-				} else {
-					args.Entries = rf.Log[rf.nextIndex[server]:]
-				}
-				// args.Entries = rf.Log[rf.nextIndex[server]:]
+				args.Entries = rf.Log[rf.nextIndex[server]-1:]
 			}
 			reply := &AppendEntriesReply{}
 			ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
@@ -547,6 +567,7 @@ func (rf *Raft) startAppendEntries(server int) {
 					} else {
 						rf.nextIndex[server]--
 					}
+					// log.Printf("raft%v false startAppendEntries() tmp:%v args.Entries:%v args.Entries:%v len(rf.log):%v", rf.me, rf.nextIndex, args.Entries, len(args.Entries), len(rf.Log))
 				} else { // 成功以后更新nextIndex和matchIndex
 					rf.nextIndex[server] += len(args.Entries)
 					rf.matchIndex[server] = rf.nextIndex[server] - 1
@@ -554,7 +575,7 @@ func (rf *Raft) startAppendEntries(server int) {
 					temp := rf.matchIndex
 					sort.Ints(temp)
 					N := temp[len(rf.peers)/2-1]
-					log.Printf("raft%v startAppendEntries() tmp:%v args.Entries:%v args.Entries:%v len(rf.log):%v", rf.me, rf.matchIndex, args.Entries, len(args.Entries), len(rf.Log))
+					// log.Printf("raft%v true startAppendEntries() tmp:%v args.Entries:%v args.Entries:%v len(rf.log):%v", rf.me, rf.matchIndex, args.Entries, len(args.Entries), len(rf.Log))
 					if N > rf.commitedIndex {
 						if rf.Log[N-1].Term == rf.currentTerm {
 							rf.commitedIndex = N
@@ -568,64 +589,6 @@ func (rf *Raft) startAppendEntries(server int) {
 		<-t.C
 	}
 }
-
-// 向server发送appendEntriesRPC
-// func (rf *Raft) startAppendEntries(server int) {
-// 	i := 0 // 第一次发送空的entry
-// 	for {
-// 		if rf.status == LEADER {
-// 			t := time.NewTicker(8 * time.Millisecond) // 每隔一段时间发送心跳
-// 			<-t.C
-// 			args := AppendEntriesArgs{
-// 				Term:          rf.currentTerm,
-// 				LeaderID:      rf.me,
-// 				PrevLogIndex:  rf.nextIndex[server] - 1,
-// 				LeaderCommmit: rf.commitedIndex,
-// 			}
-// 			if len(rf.log) != 0 && args.PrevLogIndex > 0 {
-// 				args.PrevLogTerm = rf.log[args.PrevLogIndex-1].Term
-// 			}
-// 			if i != 0 {
-// 				if rf.nextIndex[server] < len(rf.log) {
-// 					args.Entries = rf.log[rf.nextIndex[server]:]
-// 					// log.Printf("raft%v args.Entries:%v len(rf.log)：%v rf.nextIndex[%v]:%v", rf.me, len(args.Entries), len(rf.log), server, rf.nextIndex[server])
-// 				}
-// 			}
-// 			reply := &AppendEntriesReply{}
-// 			ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
-// 			if !ok {
-// 				// log.Printf("raft%v heartbeat发送失败 %v", rf.me, rf.status)
-// 			} else {
-// 				if !reply.Success {
-// 					if rf.status == LEADER && reply.Term > rf.currentTerm {
-// 						rf.currentTerm = reply.Term
-// 						rf.votedFor = -1
-// 						rf.status = FOLLWER
-// 						rf.l2f <- true
-// 					} else {
-// 						rf.nextIndex[server]--
-// 					}
-// 				} else {
-// 					if i != 0 && len(args.Entries) > 0 {
-// 						rf.nextIndex[server] += len(args.Entries)
-// 						rf.matchIndex[server] = rf.nextIndex[server]
-// 						// 遍历所有的matchIndex，找到大多数的matchIndex[i]>=N成立的N
-// 						temp := rf.matchIndex
-// 						sort.Ints(temp)
-// 						N := temp[len(rf.peers)/2-1]
-// 						// log.Printf("raft%v startAppendEntries() tmp:%v args.Entries:%v args.Entries:%v len(rf.log):%v", rf.me, rf.nextIndex, args.Entries, len(args.Entries), len(rf.log))
-// 						if N > rf.commitedIndex {
-// 							if rf.log[N-1].Term == rf.currentTerm {
-// 								rf.commitedIndex = N
-// 							}
-// 						}
-// 					}
-// 				}
-// 			}
-// 			i = 1
-// 		}
-// 	}
-// }
 
 func Max(x, y int) int {
 	if x > y {
