@@ -332,7 +332,7 @@ func (cfg *config) nCommitted(index int) (int, interface{}) {
 		cfg.mu.Lock()
 		cmd1, ok := cfg.logs[i][index]
 		cfg.mu.Unlock()
-		log.Printf("nCommitted cmd1 %v ok %v", cmd1, ok)
+		// log.Printf("nCommitted cmd1 %v ok %v", cmd1, ok)
 		if ok {
 			if count > 0 && cmd != cmd1 {
 				cfg.t.Fatalf("committed values do not match: index %v, %v, %v\n",
@@ -413,13 +413,14 @@ func (cfg *config) one(cmd int, expectedServers int) int {
 			// somebody claimed to be the leader and to have
 			// submitted our command; wait a while for agreement.
 			t1 := time.Now()
+
+			// log.Printf("config.go expectedServers %v cmd1 %v index %v", expectedServers, cmd, index)
 			for time.Since(t1).Seconds() < 2 { // 如果两秒内成功同步，就说明成功
-				nd, cmd1 := cfg.nCommitted(index) // 有多少server认为index处的entry已经被提交了
-				log.Printf("config.go nd %v expectedServers %v cmd1 %v index %v", nd, expectedServers, cmd, index)
+				nd, cmd1 := cfg.nCommitted(index)    // 有多少server认为index处的entry已经被提交了
 				if nd > 0 && nd >= expectedServers { // 如果server数大于expected的数量，则正确
 					// committed
-					tmp, _ := cmd1.(int)
-					log.Printf("config.go cmd1 %v cmd2 %v", cmd1, tmp)
+					// tmp, _ := cmd1.(int)
+					// log.Printf("config.go cmd1 %v cmd2 %v", cmd1, tmp)
 					if cmd2, ok := cmd1.(int); ok && cmd2 == cmd {
 						// and it was the command we submitted.
 						return index

@@ -8,12 +8,14 @@ package raft
 // test with the original before submitting.
 //
 
-import "testing"
-import "fmt"
-import "time"
-import "math/rand"
-import "sync/atomic"
-import "sync"
+import (
+	"fmt"
+	"math/rand"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+)
 
 // The tester generously allows solutions to complete elections in one second
 // (much more than the paper's range of timeouts).
@@ -336,6 +338,7 @@ func TestBackup(t *testing.T) {
 	cfg.disconnect((leader1 + 3) % servers)
 	cfg.disconnect((leader1 + 4) % servers)
 
+	// log.Printf("test_test %v", cfg.connected)
 	// submit lots of commands that won't commit
 	for i := 0; i < 50; i++ {
 		cfg.rafts[leader1].Start(rand.Int())
@@ -345,11 +348,11 @@ func TestBackup(t *testing.T) {
 
 	cfg.disconnect((leader1 + 0) % servers)
 	cfg.disconnect((leader1 + 1) % servers)
-
 	// allow other partition to recover
 	cfg.connect((leader1 + 2) % servers)
 	cfg.connect((leader1 + 3) % servers)
 	cfg.connect((leader1 + 4) % servers)
+	// log.Printf("test_test %v", cfg.connected)
 
 	// lots of successful commands to new group.
 	for i := 0; i < 50; i++ {
@@ -364,6 +367,7 @@ func TestBackup(t *testing.T) {
 	}
 	cfg.disconnect(other)
 
+	// log.Printf("test_test %v", cfg.connected)
 	// lots more commands that won't commit
 	for i := 0; i < 50; i++ {
 		cfg.rafts[leader2].Start(rand.Int())
@@ -379,6 +383,7 @@ func TestBackup(t *testing.T) {
 	cfg.connect((leader1 + 1) % servers)
 	cfg.connect(other)
 
+	// log.Printf("test_test %v", cfg.connected)
 	// lots of successful commands to new group.
 	for i := 0; i < 50; i++ {
 		cfg.one(rand.Int(), 3)
@@ -388,6 +393,8 @@ func TestBackup(t *testing.T) {
 	for i := 0; i < servers; i++ {
 		cfg.connect(i)
 	}
+
+	// log.Printf("test_test %v", cfg.connected)
 	cfg.one(rand.Int(), servers)
 
 	fmt.Printf("  ... Passed\n")
